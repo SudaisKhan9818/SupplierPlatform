@@ -29,7 +29,7 @@ interface PayModalState {
 
 export default function PaymentsPage() {
   const { data, isLoading, mutate } = useAppData();
-  const { suppliers, payments } = data;
+  const { suppliers, payments, materialsBySupplier } = data;
   const { toast } = useToast();
 
   const [search, setSearch] = useState("");
@@ -72,9 +72,15 @@ export default function PaymentsPage() {
       const total_delivered = deliveredMap.get(s.id) || 0;
       const total_paid = paidMap.get(s.id) || 0;
       const balance_due = total_delivered - total_paid;
-      return { ...s, total_delivered, total_paid, balance_due };
+      return {
+        ...s,
+        material_type: s.material_type?.trim() || materialsBySupplier[s.id] || undefined,
+        total_delivered,
+        total_paid,
+        balance_due,
+      };
     }).sort((a, b) => b.balance_due - a.balance_due);
-  }, [suppliers, data.deliveries, data.payments, data.purchases]);
+  }, [suppliers, materialsBySupplier, data.deliveries, data.payments, data.purchases]);
 
   const filteredBalances = useMemo(
     () => supplierBalances.filter((s) =>
@@ -308,9 +314,9 @@ export default function PaymentsPage() {
                       <td className="px-4 py-3.5">
                         {s.material_type
                           ? <span className="px-2 py-0.5 bg-[#1e3464] text-[#8faac3] rounded text-xs">{s.material_type}</span>
-                          : <span className="text-[#8faac3]">—</span>}
+                          : <span className="text-[#8faac3]">Not provided</span>}
                       </td>
-                      <td className="px-4 py-3.5 text-[#8faac3] text-sm">{s.phone || "—"}</td>
+                      <td className="px-4 py-3.5 text-[#8faac3] text-sm">{s.phone || "Not provided"}</td>
                       <td className="px-4 py-3.5 text-right font-mono text-[#e2e8f0]">{formatSAR(s.total_delivered)}</td>
                       <td className="px-4 py-3.5 text-right font-mono text-emerald-400">{formatSAR(s.total_paid)}</td>
                       <td className="px-4 py-3.5 text-right font-mono font-bold">

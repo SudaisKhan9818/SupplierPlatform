@@ -43,7 +43,7 @@ import { cn } from "@/lib/utils";
 
 export default function SuppliersPage() {
   const { data, isLoading, mutate } = useAppData();
-  const { suppliers, summaries } = data;
+  const { suppliers, summaries, materialsBySupplier } = data;
   const [searchTerm, setSearchTerm] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedSupplierForUpdate, setSelectedSupplierForUpdate] = useState<{
@@ -200,9 +200,15 @@ export default function SuppliersPage() {
         sPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0) +
         sPurchases.reduce((acc, pur) => acc + (Number(pur.payment_amount) || 0), 0);
 
-      return { ...s, total_delivered, total_paid, balance_due: total_delivered - total_paid };
+      return {
+        ...s,
+        material_type: s.material_type?.trim() || materialsBySupplier[s.id] || undefined,
+        total_delivered,
+        total_paid,
+        balance_due: total_delivered - total_paid,
+      };
     });
-  }, [suppliers, data.deliveries, data.payments, data.purchases, dateFilter, customFrom, customTo]);
+  }, [suppliers, materialsBySupplier, data.deliveries, data.payments, data.purchases, dateFilter, customFrom, customTo]);
 
   const filteredSummaries = useMemo(
     () =>
@@ -360,12 +366,12 @@ export default function SuppliersPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3.5 text-[#8faac3]">{summary.contact_person || "—"}</td>
-                      <td className="px-4 py-3.5 text-[#8faac3]">{summary.phone || "—"}</td>
+                      <td className="px-4 py-3.5 text-[#8faac3]">{summary.contact_person || "Not provided"}</td>
+                      <td className="px-4 py-3.5 text-[#8faac3]">{summary.phone || "Not provided"}</td>
                       <td className="px-4 py-3.5">
                         {summary.material_type ? (
                           <span className="px-2 py-0.5 bg-[#1e3464] text-[#8faac3] rounded text-xs">{summary.material_type}</span>
-                        ) : "—"}
+                        ) : <span className="text-[#8faac3]">Not provided</span>}
                       </td>
                       <td className="px-4 py-3.5 text-right font-mono text-[#e2e8f0]">{formatSAR(summary.total_delivered)}</td>
                       <td className="px-4 py-3.5 text-right font-mono text-emerald-400">{formatSAR(summary.total_paid)}</td>

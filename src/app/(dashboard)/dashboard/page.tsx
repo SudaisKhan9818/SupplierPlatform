@@ -172,7 +172,7 @@ export default function DashboardPage() {
                     <td className="px-5 py-3.5">
                       {item.material_type
                         ? <span className="px-2 py-0.5 bg-[#1e3464] text-[#8faac3] rounded text-xs">{item.material_type}</span>
-                        : <span className="text-[#8faac3]">—</span>}
+                        : <span className="text-[#8faac3]">Not provided</span>}
                     </td>
                     <td className="px-5 py-3.5 text-right font-mono text-[#e2e8f0]">{formatSAR(item.total_delivered)}</td>
                     <td className="px-5 py-3.5 text-right font-mono text-emerald-400">{formatSAR(item.total_paid)}</td>

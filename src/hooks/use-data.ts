@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { Supplier, Delivery, Payment, SupplierSummary, Purchase, PurchaseItem } from "@/types";
 
 const CACHE_KEY = "suppliertrack/global";
+const PAGE_SIZE = 1000;
 
 export interface AppData {
   suppliers: Supplier[];
@@ -11,34 +12,52 @@ export interface AppData {
   purchases: Purchase[];
   purchaseItems: PurchaseItem[];
   summaries: SupplierSummary[];
+  materialsBySupplier: Record<string, string>;
+}
+
+async function fetchAllRows<T>(table: string, orderColumn: string, ascending: boolean): Promise<T[]> {
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .order(orderColumn, { ascending })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) throw error;
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+
+    if (page.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  return rows;
 }
 
 async function fetchAll(): Promise<AppData> {
   const [
-    { data: suppliers, error: sErr },
-    { data: deliveries, error: dErr },
-    { data: payments, error: pErr },
-    { data: purchases, error: purErr },
-    { data: purchaseItems, error: pItemErr },
+    suppliers,
+    deliveries,
+    payments,
+    purchases,
+    purchaseItems,
   ] = await Promise.all([
-    supabase.from("suppliers").select("*").order("created_at", { ascending: false }),
-    supabase.from("deliveries").select("*").order("delivery_date", { ascending: false }),
-    supabase.from("payments").select("*").order("payment_date", { ascending: false }),
-    supabase.from("purchases").select("*").order("purchase_date", { ascending: false }),
-    supabase.from("purchase_items").select("*"),
+    fetchAllRows<Supplier>("suppliers", "created_at", false),
+    fetchAllRows<Delivery>("deliveries", "delivery_date", false),
+    fetchAllRows<Payment>("payments", "payment_date", false),
+    fetchAllRows<Purchase>("purchases", "purchase_date", false),
+    fetchAllRows<PurchaseItem>("purchase_items", "id", true),
   ]);
 
-  if (sErr) throw sErr;
-  if (dErr) throw dErr;
-  if (pErr) throw pErr;
-  if (purErr) throw purErr;
-  if (pItemErr) throw pItemErr;
-
-  const sList: Supplier[] = suppliers || [];
-  const dList: Delivery[] = deliveries || [];
-  const pList: Payment[] = payments || [];
-  const purList: Purchase[] = purchases || [];
-  const pItemList: PurchaseItem[] = purchaseItems || [];
+  const sList = suppliers;
+  const dList = deliveries;
+  const pList = payments;
+  const purList = purchases;
+  const pItemList = purchaseItems;
 
   // Build lookup maps for O(1) access instead of O(n) filtering
   const deliveriesBySupplier = new Map<string, Delivery[]>();
@@ -61,6 +80,36 @@ async function fetchAll(): Promise<AppData> {
     arr.push(pur);
     purchasesBySupplier.set(pur.supplier_id, arr);
   }
+
+  // Use recorded deliveries and purchase items as a display fallback when
+  // older supplier rows do not have the optional material_type field filled.
+  const purchaseItemsByPurchase = new Map<string, PurchaseItem[]>();
+  for (const item of pItemList) {
+    const arr = purchaseItemsByPurchase.get(item.purchase_id) || [];
+    arr.push(item);
+    purchaseItemsByPurchase.set(item.purchase_id, arr);
+  }
+
+  const materialNamesBySupplier = new Map<string, Set<string>>();
+  const addMaterial = (supplierId: string, materialName?: string) => {
+    const name = materialName?.trim();
+    if (!name) return;
+    const materials = materialNamesBySupplier.get(supplierId) || new Set<string>();
+    materials.add(name);
+    materialNamesBySupplier.set(supplierId, materials);
+  };
+
+  for (const delivery of dList) addMaterial(delivery.supplier_id, delivery.material_name);
+  for (const purchase of purList) {
+    for (const item of purchaseItemsByPurchase.get(purchase.id) || []) {
+      addMaterial(purchase.supplier_id, item.item_name);
+    }
+  }
+
+  const materialsBySupplier: Record<string, string> = {};
+  materialNamesBySupplier.forEach((materials, supplierId) => {
+    materialsBySupplier[supplierId] = Array.from(materials).join(", ");
+  });
 
   const summaries: SupplierSummary[] = sList.map((s) => {
     const sDeliveries = deliveriesBySupplier.get(s.id) || [];
@@ -88,7 +137,7 @@ async function fetchAll(): Promise<AppData> {
       id: s.id,
       name: s.name,
       contact_person: s.contact_person,
-      material_type: s.material_type,
+      material_type: s.material_type?.trim() || materialsBySupplier[s.id] || undefined,
       phone: s.phone,
       opening_balance,
       total_delivered,
@@ -97,7 +146,15 @@ async function fetchAll(): Promise<AppData> {
     };
   });
 
-  return { suppliers: sList, deliveries: dList, payments: pList, purchases: purList, purchaseItems: pItemList, summaries };
+  return {
+    suppliers: sList,
+    deliveries: dList,
+    payments: pList,
+    purchases: purList,
+    purchaseItems: pItemList,
+    summaries,
+    materialsBySupplier,
+  };
 }
 
 export function useAppData() {
@@ -115,7 +172,15 @@ export function useAppData() {
   );
 
   return {
-    data: data || { suppliers: [], deliveries: [], payments: [], purchases: [], purchaseItems: [], summaries: [] },
+    data: data || {
+      suppliers: [],
+      deliveries: [],
+      payments: [],
+      purchases: [],
+      purchaseItems: [],
+      summaries: [],
+      materialsBySupplier: {},
+    },
     isLoading,
     error,
     mutate,
