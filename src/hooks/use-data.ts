@@ -24,6 +24,8 @@ async function fetchAllRows<T>(table: string, orderColumn: string, ascending: bo
       .from(table)
       .select("*")
       .order(orderColumn, { ascending })
+      // Keep offset pagination deterministic when many rows share a date.
+      .order("id", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
 
     if (error) throw error;

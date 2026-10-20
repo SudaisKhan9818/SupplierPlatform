@@ -4,6 +4,58 @@ import { Employee, SalaryMonth, SalaryTransaction } from "@/types";
 
 // ─── Cache Keys ──────────────────────────────────────────────
 const STAFF_CACHE_KEY = "suppliertrack/staff";
+const PAGE_SIZE = 1000;
+
+async function fetchAllRows<T>(
+  table: string,
+  columns: string,
+  orderColumn: string,
+  ascending: boolean
+): Promise<T[]> {
+  const rows: T[] = [];
+
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .order(orderColumn, { ascending })
+      .order("id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) throw error;
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
+async function fetchEmployeeRows<T>(
+  table: string,
+  columns: string,
+  employeeId: string
+): Promise<T[]> {
+  const rows: T[] = [];
+
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .eq("employee_id", employeeId)
+      .order("id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) throw error;
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  return rows;
+}
 
 // ─── Data Shape ──────────────────────────────────────────────
 export interface StaffData {
@@ -14,29 +66,16 @@ export interface StaffData {
 
 // ─── Fetcher ─────────────────────────────────────────────────
 async function fetchStaffData(): Promise<StaffData> {
-  const [
-    { data: employees, error: eErr },
-    { data: salaryMonths, error: smErr },
-    { data: transactions, error: tErr },
-  ] = await Promise.all([
-    supabase
-      .from("employees")
-      .select("*")
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("salary_months")
-      .select("*, employees(name)")
-      .order("year", { ascending: false })
-      .order("month", { ascending: false }),
-    supabase
-      .from("salary_transactions")
-      .select("*, employees(name), salary_months(month, year)")
-      .order("date", { ascending: false }),
+  const [employees, salaryMonths, transactions] = await Promise.all([
+    fetchAllRows<Employee>("employees", "*", "created_at", false),
+    fetchAllRows<SalaryMonth>("salary_months", "*, employees(name)", "id", true),
+    fetchAllRows<SalaryTransaction>(
+      "salary_transactions",
+      "*, employees(name), salary_months(month, year)",
+      "date",
+      false
+    ),
   ]);
-
-  if (eErr) throw eErr;
-  if (smErr) throw smErr;
-  if (tErr) throw tErr;
 
   return {
     employees: (employees || []) as Employee[],
@@ -77,37 +116,22 @@ export function useEmployeeDetail(employeeId: string | undefined) {
     async () => {
       if (!employeeId) return null;
 
-      const [
-        { data: employee, error: eErr },
-        { data: months, error: mErr },
-        { data: txns, error: tErr },
-      ] = await Promise.all([
+      const [{ data: employee, error: eErr }, months, txns] = await Promise.all([
         supabase
           .from("employees")
           .select("*")
           .eq("id", employeeId)
           .single(),
-        supabase
-          .from("salary_months")
-          .select("*")
-          .eq("employee_id", employeeId)
-          .order("year", { ascending: false })
-          .order("month", { ascending: false }),
-        supabase
-          .from("salary_transactions")
-          .select("*")
-          .eq("employee_id", employeeId)
-          .order("date", { ascending: false }),
+        fetchEmployeeRows<SalaryMonth>("salary_months", "*", employeeId),
+        fetchEmployeeRows<SalaryTransaction>("salary_transactions", "*", employeeId),
       ]);
 
       if (eErr) throw eErr;
-      if (mErr) throw mErr;
-      if (tErr) throw tErr;
 
       return {
         employee: employee as Employee,
-        salaryMonths: (months || []) as SalaryMonth[],
-        transactions: (txns || []) as SalaryTransaction[],
+        salaryMonths: months,
+        transactions: txns,
       };
     },
     {

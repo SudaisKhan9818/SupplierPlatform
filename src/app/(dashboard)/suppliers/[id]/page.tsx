@@ -42,6 +42,60 @@ import QuickUpdatePopup from "@/components/QuickUpdatePopup";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 
+const PAGE_SIZE = 1000;
+
+async function fetchSupplierRows<T>(
+  table: string,
+  supplierId: string,
+  orderColumn: string
+): Promise<T[]> {
+  const rows: T[] = [];
+
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .eq("supplier_id", supplierId)
+      .order(orderColumn, { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) throw error;
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
+async function fetchPurchaseItems(purchaseIds: string[]): Promise<PurchaseItem[]> {
+  const rows: PurchaseItem[] = [];
+  const chunkSize = 100;
+
+  for (let start = 0; start < purchaseIds.length; start += chunkSize) {
+    const ids = purchaseIds.slice(start, start + chunkSize);
+
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data, error } = await supabase
+        .from("purchase_items")
+        .select("*")
+        .in("purchase_id", ids)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) throw error;
+
+      const page = (data || []) as PurchaseItem[];
+      rows.push(...page);
+      if (page.length < PAGE_SIZE) break;
+    }
+  }
+
+  return rows;
+}
+
 export default function SupplierDetailPage() {
   const { id } = useParams();
   const { toast } = useToast();
@@ -88,48 +142,31 @@ export default function SupplierDetailPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      const supplierId = Array.isArray(id) ? id[0] : id;
+      if (!supplierId) return;
+
       const { data: sData, error: sError } = await supabase
         .from("suppliers")
         .select("*")
-        .eq("id", id)
+        .eq("id", supplierId)
         .single();
       if (sError) throw sError;
       setSupplier(sData);
       setEditForm(sData || {});
 
-      const { data: dData, error: dError } = await supabase
-        .from("deliveries")
-        .select("*")
-        .eq("supplier_id", id)
-        .order("delivery_date", { ascending: false });
-      if (dError) throw dError;
-      setDeliveries(dData || []);
+      const [dData, pData, purData] = await Promise.all([
+        fetchSupplierRows<Delivery>("deliveries", supplierId, "delivery_date"),
+        fetchSupplierRows<Payment>("payments", supplierId, "payment_date"),
+        fetchSupplierRows<Purchase>("purchases", supplierId, "purchase_date"),
+      ]);
+      setDeliveries(dData);
+      setPayments(pData);
+      setPurchases(purData);
 
-      const { data: pData, error: pError } = await supabase
-        .from("payments")
-        .select("*")
-        .eq("supplier_id", id)
-        .order("payment_date", { ascending: false });
-      if (pError) throw pError;
-      setPayments(pData || []);
-
-      const { data: purData, error: purError } = await supabase
-        .from("purchases")
-        .select("*")
-        .eq("supplier_id", id)
-        .order("purchase_date", { ascending: false });
-      if (purError) throw purError;
-      setPurchases(purData || []);
-
-      if (purData && purData.length > 0) {
-        const purchaseIds = purData.map(p => p.id);
-        const { data: piData, error: piError } = await supabase
-          .from("purchase_items")
-          .select("*")
-          .in("purchase_id", purchaseIds);
-        if (piError) throw piError;
-        setPurchaseItems(piData || []);
-      }
+      const piData = purData.length > 0
+        ? await fetchPurchaseItems(purData.map((purchase) => purchase.id))
+        : [];
+      setPurchaseItems(piData);
     } catch (error: unknown) {
       toast({
         title: "Error loading supplier",
